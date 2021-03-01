@@ -2,6 +2,7 @@ package jdbc
 
 import slick.jdbc.MySQLProfile.api._
 
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
@@ -15,6 +16,9 @@ object JDBCOps extends App {
   // refer to file C:\Users\SAMAR\OneDrive\sparkprojects\misc_files_scripts\fodf_write_to_mysql_and_furhter.scala
   // file present in sqlstocks package in sparkproject
 
+  // to run queries in sbt console
+  // copy trait tables from Tables.scala which is generated from running SlcikMysqlCodegen.scala  and execute that
+
   val futRows: Future[Seq[Tables.FutpltblRow]] = db.run(Tables.Futpltbl.result)
   /*
   to see the sql statements slick will generate on any result add
@@ -27,15 +31,38 @@ object JDBCOps extends App {
     case _ => println("some problem occurred. check")
   }
 
+  // running db.stream which generates a DatabasePublisher which can
+  // be processed and consumed by Akka Streams
+  // Here we iterate using foreach and see how it works
+  val symbolStatusBuffer = mutable.ArrayBuffer[(Option[String], Option[Double])]()
+  db.stream(Tables.Futpltbl.map(x => (x.symbol, x.finStatus)).result).foreach{ x =>
+    symbolStatusBuffer.append(x)
+  }
+  println(s"streamed  ${symbolStatusBuffer.length} tuplses into symbolStatusBuffer")
+  symbolStatusBuffer.take(5).foreach(println)
+
+  // Future compositions
+  // map - refer to Tables.Futpltbl.map above
+  // flatmap illustraion
+  val flatMapQuery = Tables.Prvoltbl.filter(_.delper > 50.0).flatMap{
+    prvolrow =>
+      Tables.Futpltbl.filter(_.symbol === prvolrow.symbol).map{
+        fplRow => (prvolrow.symbol, fplRow.timestamp, fplRow.finStatus, prvolrow.delper)
+      }
+  }
+  Await.result(db.run(flatMapQuery.result), 2.seconds).foreach(println)
+
+  // filter
   def findFPLsForSymbol(symbol: String): Query[Tables.Futpltbl, Tables.FutpltblRow, Seq] = Tables.Futpltbl.filter(_.symbol === symbol)
 
   println("Printing out the results for a particular symbol")
   Await.result(db.run(findFPLsForSymbol("TCS").result), 2.seconds).foreach(println)
 
   //getFutureProfitLossesForRandomStock
-  def getFPLsForRandomStock = Tables.Futpltbl.map(_.symbol).distinct
+  def getFPLsForRandomStock:  Query[Rep[Option[String]], Option[String], Seq] = Tables.Futpltbl.map(_.symbol)
 
   // make a copy of a particular symbol and insert rows for it to the base table
+  // inserting data
   db.run(Tables.Futpltbl.filter(ftpl => ftpl.symbol === "TCS").result).onComplete {
     case Success(futpls) => futpls.foreach {
       x =>
@@ -145,7 +172,7 @@ object JDBCOps extends App {
   Await.result(db.run(caseWhenQuery.result), 2.seconds)
 
   // group by symbol and seller/buyer - who won
-  // that should give us grousp like (ACC,Buyer) -> (ACC, Buyer), (ACC, Buyer), and so on
+  // that should give us groups like (ACC,Buyer) -> (ACC, Buyer), (ACC, Buyer), and so on
   // map it to ACC, Buyer and the length of the group
   Await.result(
     db.run(
