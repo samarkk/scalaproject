@@ -1,4 +1,4 @@
-package practice.parenomits
+package basics
 
 object ParensWhenOmit extends App {
   val slist = List("raman", "shaman", "waman", "chaman", "baman", "naman", "gaman")
